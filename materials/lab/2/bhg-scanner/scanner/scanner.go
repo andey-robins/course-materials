@@ -1,27 +1,33 @@
 // bhg-scanner/scanner.go modified from Black Hat Go > CH2 > tcp-scanner-final > main.go
 // Code : https://github.com/blackhat-go/bhg/blob/c27347f6f9019c8911547d6fc912aa1171e6c362/ch-2/tcp-scanner-final/main.go
 // License: {$RepoRoot}/materials/BHG-LICENSE
-// Useage:
-// {TODO 1: FILL IN}
 
 package scanner
 
 import (
 	"fmt"
 	"net"
-	"sort"
+	"os"
+	"time"
+	"log"
 )
 
-//TODO 3 : ADD closed ports; currently code only tracks open ports
-var openports []int  // notice the capitalization here. access limited!
+// Server contains a map that lists which ports are open for a given server.
+// Ports contains this mapping
+// Size is the number of ports scanned
+// Address is the server url
+type Server struct {
+	Ports map[int]bool
+	Size int
+	Address string
+}
 
-
-func worker(ports, results chan int) {
+func worker(addr string, ports, results chan int) {
 	for p := range ports {
-		address := fmt.Sprintf("scanme.nmap.org:%d", p)    
-		conn, err := net.Dial("tcp", address) // TODO 2 : REPLACE THIS WITH DialTimeout (before testing!)
+		address := fmt.Sprintf("%s:%d", addr, p)    
+		conn, err := net.DialTimeout("tcp", address, 500 * time.Millisecond)
 		if err != nil { 
-			results <- 0
+			results <- -p
 			continue
 		}
 		conn.Close()
@@ -29,43 +35,79 @@ func worker(ports, results chan int) {
 	}
 }
 
-// for Part 5 - consider
-// easy: taking in a variable for the ports to scan (int? slice? ); a target address (string?)?
-// med: easy + return  complex data structure(s?) (maps or slices) containing the ports.
-// hard: restructuring code - consider modification to class/object 
-// No matter what you do, modify scanner_test.go to align; note the single test currently fails
-func PortScanner() int {  
+// PortScanner takes a url to scan and returns the count of open and closed ports.
+// it also takes a filename and if the filename is not "", outputs results to a CSV with that name
+func PortScanner(address, fname string) (openCount, closeCount int) {  
+	if fname == "" {
+		return portScannerWrapped(address, fname, false)
+	} else {
+		return portScannerWrapped(address, fname, true)
+	}
+}
 
-	ports := make(chan int, 100)   // TODO 4: TUNE THIS FOR CODEANYWHERE / LOCAL MACHINE
+// portScannerWrapped takes arguments handed to the public function PortScanner and then
+// does the actual output, switching based on the value of shouldOutputCSV to determine
+// if the function should write to a file
+func portScannerWrapped(address, fname string, shouldOutputCSV bool) (openCount, closeCount int) {
+	ports := make(chan int, 100) 
 	results := make(chan int)
 
+	scannedServer := Server{
+		Ports: make(map[int]bool),
+		Size: 1024,
+		Address: address,
+	}
+
 	for i := 0; i < cap(ports); i++ {
-		go worker(ports, results)
+		go worker(address, ports, results)
 	}
 
 	go func() {
-		for i := 1; i <= 1024; i++ {
+		for i := 1; i <= scannedServer.Size; i++ {
 			ports <- i
 		}
 	}()
 
-	for i := 0; i < 1024; i++ {
+	for i := 0; i < scannedServer.Size; i++ {
 		port := <-results
-		if port != 0 {
-			openports = append(openports, port)
+		if port < 0 {
+			scannedServer.Ports[port] = false
+			closeCount++
+		} else {
+			scannedServer.Ports[port] = true
+			openCount++
 		}
 	}
 
 	close(ports)
 	close(results)
-	sort.Ints(openports)
 
-	//TODO 5 : Enhance the output for easier consumption, include closed ports
-
-	for _, port := range openports {
-		fmt.Printf("%d open\n", port)
+	if !shouldOutputCSV {
+		return
 	}
 
-	return len(openports) // TODO 6 : Return total number of ports scanned (number open, number closed); 
-	//you'll have to modify the function parameter list in the defintion and the values in the scanner_test
+	f, err := os.Create(fname)
+	if err != nil {
+		log.Println("Error creating output file")
+		return
+	}
+	defer f.Close()
+
+	_, err = f.WriteString("port,isOpen\n")
+	if err != nil {
+		panic(err)
+	}
+
+	for i := 1; i <= scannedServer.Size; i++ {
+		if scannedServer.Ports[i] {
+			_, err = f.WriteString(fmt.Sprintf("%v,%v\n", i, true))
+		} else {
+			_, err = f.WriteString(fmt.Sprintf("%v,%v\n", i, false))
+		}
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	return
 }
