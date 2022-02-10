@@ -1,1 +1,5 @@
-You might need to do a "go mod init bhg-scanner" or "go mod tidy"
+Code in `main/` contains the boilerplate to load command line arguments for output file and url to scan. This then calls the exported function PortScanner in `scanner/` to perform the work of scanning.
+
+I modified the code by a) adding a server struct to track relevant information about the scanned server such as ports scanned and their status, the number scanned, and the url. This could be reused by later code to only run exploits on servers that fulfil a specific condition (i.e. having port 22 open, being in the .ru tld, etc.) b) added command line arguments and parsing for them to allow this to be configured at the command line level and c) added the optional ability to output a file with scan results in CSV form.
+
+Tests were added that hit my servers at andeyrobins.org and that test for the creation of a file.
