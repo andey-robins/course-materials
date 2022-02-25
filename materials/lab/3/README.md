@@ -8,7 +8,20 @@ Lab3Dir has two main folders main and shodan
 main folder, where you'll run the program from (read top of main.go for details); you'll need to modify this based on which options you choose below
 shodan folder, where you'll be adding additional code, do not try to run this code independently
 
+## Extension
 
+For my extension I added in the functionality to add alerts to a specified ip. You are then able to query a list of triggers and add a trigger to the alert IP.
+
+To use the old search functionality use `./main search <query>`. The new query is accessed with `./main alert {alert queries}`.
+
+There are four supported operands to alert: `new, list, triggers, and add`. These create a new alert, list all active alerts, list all valid triggers, and add a trigger to an alert respectively. Each subcommand provides information on usage when being invoked.
+
+```bash
+./main alert new andeyrobins.org 45.33.22.9
+./main alert list 
+./main alert triggers
+./main alert add <trigger name> <alert id>
+```
 
 ## Part 1(12 points)
 
