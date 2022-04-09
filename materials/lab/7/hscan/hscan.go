@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 //==========================================================================\\
@@ -28,18 +29,25 @@ func GuessSingle(sourceHash string, filename string) {
 	for scanner.Scan() {
 		password := scanner.Text()
 
-		// TODO - From the length of the hash you should know which one of these to check ...
-		// add a check and logicial structure
-
-		hash := fmt.Sprintf("%x", md5.Sum([]byte(password)))
-		if hash == sourceHash {
-			fmt.Printf("[+] Password found (MD5): %s\n", password)
+		switch len(sourceHash) {
+		case 32:
+			{ // md5 is 32 hex characters long
+				hash := fmt.Sprintf("%x", md5.Sum([]byte(password)))
+				if hash == sourceHash {
+					fmt.Printf("[+] Password found (MD5): %s\n", password)
+				}
+			}
+		case 64:
+			{ // SHA-256 is 64 hex characters long
+				hash := fmt.Sprintf("%x", sha256.Sum256([]byte(password)))
+				if hash == sourceHash {
+					fmt.Printf("[+] Password found (SHA-256): %s\n", password)
+				}
+			}
+		default:
+			fmt.Println("Unexpected hash length.")
 		}
 
-		hash = fmt.Sprintf("%x", sha256.Sum256([]byte(password)))
-		if hash == sourceHash {
-			fmt.Printf("[+] Password found (SHA-256): %s\n", password)
-		}
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -49,11 +57,78 @@ func GuessSingle(sourceHash string, filename string) {
 
 func GenHashMaps(filename string) {
 
-	//TODO
-	//itterate through a file (look in the guessSingle function above)
-	//rather than check for equality add each hash:passwd entry to a map SHA and MD5 where the key = hash and the value = password
-	//TODO at the very least use go subroutines to generate the sha and md5 hashes at the same time
-	//OPTIONAL -- Can you use workers to make this even faster
+	shalookup = make(map[string]string)
+	md5lookup = make(map[string]string)
+
+	f, err := os.Open(filename)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	fmt.Println("Creating channels")
+
+	// create worker infrastructure
+	workerCount := 400
+	shaPass := make(chan string, workerCount)
+	md5Pass := make(chan string, workerCount)
+	shaHash := make(chan string, workerCount)
+	md5Hash := make(chan string, workerCount)
+
+	fmt.Println("Channels ready to go. Spawning workers.")
+
+	// startup worker goroutines
+	for i := 0; i < workerCount; i++ {
+		go shaWorker(shaPass, shaHash)
+		go md5Worker(md5Pass, md5Hash)
+	}
+
+	fmt.Println("Workers spawned. Spawning aggregators.")
+
+	// sha aggregator
+	go func(results chan string) {
+		runningWorkers := workerCount
+		for runningWorkers > 0 {
+			res := <-results
+			if res == "i have finished hashing" {
+				runningWorkers--
+			} else {
+				splitStr := strings.Split(res, ",")
+				hash, pass := splitStr[0], splitStr[1]
+				shalookup[hash] = pass
+			}
+		}
+	}(shaHash)
+
+	// md5 aggregator
+	go func(results chan string) {
+		runningWorkers := workerCount
+		for runningWorkers > 0 {
+			res := <-results
+			if res == "i have finished hashing" {
+				runningWorkers--
+			} else {
+				splitStr := strings.Split(res, ",")
+				hash, pass := splitStr[0], splitStr[1]
+				md5lookup[hash] = pass
+			}
+		}
+	}(md5Hash)
+
+	// disperses work to the workers
+	for scanner.Scan() {
+		password := scanner.Text()
+
+		shaPass <- password
+		md5Pass <- password
+	}
+
+	fmt.Println("Finished writing passwords to workers")
+
+	shaPass <- "time to stop hashing"
+	md5Pass <- "time to stop hashing"
 
 	//TODO create a test in hscan_test.go so that you can time the performance of your implementation
 	//Test and record the time it takes to scan to generate these Maps
@@ -61,19 +136,48 @@ func GenHashMaps(filename string) {
 	// 2. Compute the time per password (hint the number of passwords for each file is listed on the site...)
 }
 
+func shaWorker(in, out chan string) {
+	for {
+		password := <-in
+
+		if password == "time to stop hashing" {
+			out <- "i have finished hashing"
+			return
+		}
+
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(password)))
+		out <- fmt.Sprintf("%s,%s", hash, password)
+	}
+}
+
+func md5Worker(in, out chan string) {
+	for {
+		password := <-in
+
+		if password == "time to stop hashing" {
+			out <- "i have finished hashing"
+			return
+		}
+
+		hash := fmt.Sprintf("%x", md5.Sum([]byte(password)))
+		out <- fmt.Sprintf("%s,%s", hash, password)
+	}
+}
+
 func GetSHA(hash string) (string, error) {
 	password, ok := shalookup[hash]
 	if ok {
 		return password, nil
-
 	} else {
-
 		return "", errors.New("password does not exist")
-
 	}
 }
 
-//TODO
 func GetMD5(hash string) (string, error) {
-	return "", errors.New("not implemented")
+	password, ok := md5lookup[hash]
+	if ok {
+		return password, nil
+	} else {
+		return "", errors.New("password does not exist")
+	}
 }
